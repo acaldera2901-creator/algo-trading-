@@ -1,11 +1,16 @@
 """
-Order Executor — OANDA and MetaTrader5 support.
+Order Executor — MetaTrader5 (Linux bridge via mt5linux), OANDA, Dry-run.
+
+MT5 on Linux:
+  Uses mt5linux which communicates with MT5 terminal running on Windows via rpyc.
+  The Windows machine must run: python -c "from mt5linux import MetaTrader5; MetaTrader5().run_server()"
+  Then set MT5_HOST in .env to the Windows machine IP (default: localhost for same-machine Wine).
 
 Handles:
 - Opening market orders with SL and TP
 - Closing positions
 - Fetching account balance and open positions
-- Dry-run mode (simulates without real orders)
+- Dry-run mode (no real orders)
 """
 
 import logging
@@ -41,148 +46,63 @@ class Position:
     open_time: str
 
 
-# ─── OANDA Executor ───────────────────────────────────────────────────────────
-
-class OANDAExecutor:
-    def __init__(self, api_key: str, account_id: str, env: str = "practice"):
-        self.account_id = account_id
-        self.env = env
-        self._client = None
-        self._init_client(api_key)
-
-    def _init_client(self, api_key: str):
-        try:
-            from oandapyV20 import API
-            self._client = API(access_token=api_key, environment=self.env)
-            logger.info(f"[Executor] OANDA client initialized ({self.env})")
-        except Exception as e:
-            logger.error(f"[Executor] OANDA init error: {e}")
-
-    def get_account_balance(self) -> float:
-        try:
-            from oandapyV20.endpoints.accounts import AccountDetails
-            r = AccountDetails(self.account_id)
-            self._client.request(r)
-            return float(r.response["account"]["balance"])
-        except Exception as e:
-            logger.error(f"[Executor] Balance fetch error: {e}")
-            return 0.0
-
-    def get_open_positions(self) -> list[Position]:
-        try:
-            from oandapyV20.endpoints.positions import OpenPositions
-            r = OpenPositions(self.account_id)
-            self._client.request(r)
-            positions = []
-            for p in r.response.get("positions", []):
-                long = p.get("long", {})
-                short = p.get("short", {})
-                units_long = float(long.get("units", 0))
-                units_short = float(short.get("units", 0))
-                if units_long != 0:
-                    positions.append(Position(
-                        order_id=str(p["instrument"]),
-                        symbol=p["instrument"],
-                        direction="buy",
-                        entry_price=float(long.get("averagePrice", 0)),
-                        current_price=0.0,
-                        stop_loss=0.0,
-                        take_profit=0.0,
-                        position_size=units_long,
-                        unrealized_pnl=float(long.get("unrealizedPL", 0)),
-                        open_time="",
-                    ))
-                if units_short != 0:
-                    positions.append(Position(
-                        order_id=str(p["instrument"]),
-                        symbol=p["instrument"],
-                        direction="sell",
-                        entry_price=float(short.get("averagePrice", 0)),
-                        current_price=0.0,
-                        stop_loss=0.0,
-                        take_profit=0.0,
-                        position_size=abs(units_short),
-                        unrealized_pnl=float(short.get("unrealizedPL", 0)),
-                        open_time="",
-                    ))
-            return positions
-        except Exception as e:
-            logger.error(f"[Executor] Open positions error: {e}")
-            return []
-
-    def open_order(self, setup: TradeSetup) -> OrderResult:
-        try:
-            from oandapyV20.endpoints.orders import OrderCreate
-
-            units = int(setup.position_size) if setup.direction == "buy" else -int(setup.position_size)
-            order_data = {
-                "order": {
-                    "type": "MARKET",
-                    "instrument": setup.symbol,
-                    "units": str(units),
-                    "stopLossOnFill": {"price": f"{setup.stop_loss:.5f}"},
-                    "takeProfitOnFill": {"price": f"{setup.take_profit:.5f}"},
-                    "timeInForce": "FOK",
-                }
-            }
-            r = OrderCreate(self.account_id, data=order_data)
-            self._client.request(r)
-            order_fill = r.response.get("orderFillTransaction", {})
-            fill_price = float(order_fill.get("price", setup.entry_price))
-            order_id = order_fill.get("id", "unknown")
-            logger.info(f"[Executor] Order filled: {setup.symbol} {setup.direction} @ {fill_price} id={order_id}")
-            return OrderResult(success=True, order_id=order_id, fill_price=fill_price)
-        except Exception as e:
-            logger.error(f"[Executor] Order error: {e}")
-            return OrderResult(success=False, order_id=None, fill_price=0.0, error=str(e))
-
-    def close_position(self, symbol: str) -> OrderResult:
-        try:
-            from oandapyV20.endpoints.positions import PositionClose
-            data = {"longUnits": "ALL", "shortUnits": "ALL"}
-            r = PositionClose(self.account_id, symbol, data=data)
-            self._client.request(r)
-            logger.info(f"[Executor] Position closed: {symbol}")
-            return OrderResult(success=True, order_id=None, fill_price=0.0)
-        except Exception as e:
-            logger.error(f"[Executor] Close error: {e}")
-            return OrderResult(success=False, order_id=None, fill_price=0.0, error=str(e))
-
-
-# ─── MT5 Executor ─────────────────────────────────────────────────────────────
+# ─── MT5 Connector (Linux-compatible via mt5linux bridge) ────────────────────
 
 class MT5Executor:
-    def __init__(self, login: int, password: str, server: str):
-        self._connected = False
-        self._init(login, password, server)
+    """
+    Connects to MetaTrader5 via mt5linux bridge.
+    On Linux: requires MT5 terminal + rpyc server running on Windows host.
+    Set MT5_HOST in .env (default 'localhost' for same machine Wine setup).
+    """
 
-    def _init(self, login: int, password: str, server: str):
+    def __init__(self, login: int, password: str, server: str, host: str = "localhost", port: int = 18812):
+        self._connected = False
+        self._mt5 = None
+        self._login = login
+        self._password = password
+        self._server = server
+        self._host = host
+        self._port = port
+        self._init()
+
+    def _init(self):
         try:
-            import MetaTrader5 as mt5
-            if not mt5.initialize(login=login, password=password, server=server):
-                logger.error(f"[Executor] MT5 init failed: {mt5.last_error()}")
+            from mt5linux import MetaTrader5
+            self._mt5 = MetaTrader5(host=self._host, port=self._port)
+            result = self._mt5.initialize(
+                login=self._login,
+                password=self._password,
+                server=self._server,
+            )
+            if not result:
+                err = self._mt5.last_error()
+                logger.error(f"[MT5] Init failed: {err}")
+                logger.error("[MT5] Ensure MT5 terminal is open and rpyc server is running on host")
                 return
-            self._connected = True
-            logger.info("[Executor] MT5 connected")
+            info = self._mt5.account_info()
+            if info:
+                logger.info(f"[MT5] Connected: {info.login} | Balance: {info.balance} {info.currency}")
+                self._connected = True
+            else:
+                logger.error("[MT5] Could not get account info after init")
         except Exception as e:
-            logger.error(f"[Executor] MT5 import error: {e}")
+            logger.error(f"[MT5] Connection error: {e}")
+            logger.error("[MT5] Start the rpyc server on your Windows/Wine MT5 machine first")
 
     def get_account_balance(self) -> float:
         if not self._connected:
             return 0.0
         try:
-            import MetaTrader5 as mt5
-            info = mt5.account_info()
+            info = self._mt5.account_info()
             return info.balance if info else 0.0
         except Exception:
             return 0.0
 
-    def get_open_positions(self) -> list[Position]:
+    def get_open_positions(self) -> list:
         if not self._connected:
             return []
         try:
-            import MetaTrader5 as mt5
-            positions = mt5.positions_get()
+            positions = self._mt5.positions_get()
             if not positions:
                 return []
             result = []
@@ -201,53 +121,74 @@ class MT5Executor:
                 ))
             return result
         except Exception as e:
-            logger.error(f"[Executor] MT5 positions error: {e}")
+            logger.error(f"[MT5] Positions error: {e}")
             return []
 
     def open_order(self, setup: TradeSetup) -> OrderResult:
         if not self._connected:
             return OrderResult(success=False, order_id=None, fill_price=0.0, error="MT5 not connected")
         try:
-            import MetaTrader5 as mt5
-            order_type = mt5.ORDER_TYPE_BUY if setup.direction == "buy" else mt5.ORDER_TYPE_SELL
+            mt5 = self._mt5
+            ORDER_TYPE_BUY = 0
+            ORDER_TYPE_SELL = 1
+            TRADE_ACTION_DEAL = 1
+            ORDER_TIME_GTC = 1
+            ORDER_FILLING_IOC = 1
+            TRADE_RETCODE_DONE = 10009
+
+            order_type = ORDER_TYPE_BUY if setup.direction == "buy" else ORDER_TYPE_SELL
+            tick = mt5.symbol_info_tick(setup.symbol)
+            price = tick.ask if setup.direction == "buy" else tick.bid
+
+            # Convert units to lots (1 standard lot = 100,000 units)
+            volume = max(round(setup.position_size / 100000, 2), 0.01)
+
             request = {
-                "action": mt5.TRADE_ACTION_DEAL,
+                "action": TRADE_ACTION_DEAL,
                 "symbol": setup.symbol,
-                "volume": round(setup.position_size / 100000, 2),  # convert units to lots
+                "volume": volume,
                 "type": order_type,
+                "price": price,
                 "sl": setup.stop_loss,
                 "tp": setup.take_profit,
                 "deviation": 20,
                 "magic": 20240101,
                 "comment": "algo-trading-agent",
-                "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC,
+                "type_time": ORDER_TIME_GTC,
+                "type_filling": ORDER_FILLING_IOC,
             }
             result = mt5.order_send(request)
-            if result.retcode == mt5.TRADE_RETCODE_DONE:
-                logger.info(f"[Executor] MT5 order done: {result.order}")
+            if result.retcode == TRADE_RETCODE_DONE:
+                logger.info(f"[MT5] Order filled: #{result.order} @ {result.price}")
                 return OrderResult(success=True, order_id=str(result.order), fill_price=result.price)
             else:
-                logger.error(f"[Executor] MT5 order failed: {result.comment}")
+                logger.error(f"[MT5] Order failed: {result.comment} (code {result.retcode})")
                 return OrderResult(success=False, order_id=None, fill_price=0.0, error=result.comment)
         except Exception as e:
-            logger.error(f"[Executor] MT5 open error: {e}")
+            logger.error(f"[MT5] Open order error: {e}")
             return OrderResult(success=False, order_id=None, fill_price=0.0, error=str(e))
 
     def close_position(self, symbol: str) -> OrderResult:
         if not self._connected:
             return OrderResult(success=False, order_id=None, fill_price=0.0, error="Not connected")
         try:
-            import MetaTrader5 as mt5
+            mt5 = self._mt5
+            TRADE_ACTION_DEAL = 1
+            ORDER_TYPE_BUY = 0
+            ORDER_TYPE_SELL = 1
+            ORDER_TIME_GTC = 1
+            ORDER_FILLING_IOC = 1
+
             positions = mt5.positions_get(symbol=symbol)
             if not positions:
                 return OrderResult(success=True, order_id=None, fill_price=0.0)
+
             for p in positions:
-                close_type = mt5.ORDER_TYPE_SELL if p.type == 0 else mt5.ORDER_TYPE_BUY
+                close_type = ORDER_TYPE_SELL if p.type == 0 else ORDER_TYPE_BUY
                 tick = mt5.symbol_info_tick(symbol)
-                price = tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask
+                price = tick.bid if close_type == ORDER_TYPE_SELL else tick.ask
                 request = {
-                    "action": mt5.TRADE_ACTION_DEAL,
+                    "action": TRADE_ACTION_DEAL,
                     "symbol": symbol,
                     "volume": p.volume,
                     "type": close_type,
@@ -256,30 +197,107 @@ class MT5Executor:
                     "deviation": 20,
                     "magic": 20240101,
                     "comment": "close",
-                    "type_time": mt5.ORDER_TIME_GTC,
-                    "type_filling": mt5.ORDER_FILLING_IOC,
+                    "type_time": ORDER_TIME_GTC,
+                    "type_filling": ORDER_FILLING_IOC,
                 }
                 mt5.order_send(request)
-            logger.info(f"[Executor] MT5 positions closed: {symbol}")
+            logger.info(f"[MT5] Position closed: {symbol}")
             return OrderResult(success=True, order_id=None, fill_price=0.0)
         except Exception as e:
-            logger.error(f"[Executor] MT5 close error: {e}")
+            logger.error(f"[MT5] Close error: {e}")
             return OrderResult(success=False, order_id=None, fill_price=0.0, error=str(e))
 
+    def get_candles(self, symbol: str, timeframe_str: str, count: int) -> "pd.DataFrame":
+        """Fetch OHLCV data directly from MT5."""
+        import pandas as pd
+        if not self._connected:
+            return pd.DataFrame()
+        try:
+            tf_map = {
+                "M1": 1, "M5": 5, "M15": 15, "M30": 30,
+                "H1": 16385, "H4": 16388, "D1": 16408,
+            }
+            tf = tf_map.get(timeframe_str, 16385)
+            rates = self._mt5.copy_rates_from_pos(symbol, tf, 0, count)
+            if rates is None:
+                return pd.DataFrame()
+            df = pd.DataFrame(rates)
+            df["timestamp"] = pd.to_datetime(df["time"], unit="s", utc=True)
+            return df.set_index("timestamp")[["open", "high", "low", "close", "tick_volume"]].rename(
+                columns={"tick_volume": "volume"})
+        except Exception as e:
+            logger.error(f"[MT5] Candles error: {e}")
+            return pd.DataFrame()
 
-# ─── Dry-run Executor ─────────────────────────────────────────────────────────
 
-class DryRunExecutor:
-    """Simulates trades without real orders. For testing."""
+# ─── OANDA Executor ───────────────────────────────────────────────────────────
+
+class OANDAExecutor:
+    def __init__(self, api_key: str, account_id: str, env: str = "practice"):
+        self.account_id = account_id
+        self._client = None
+        try:
+            from oandapyV20 import API
+            self._client = API(access_token=api_key, environment=env)
+            logger.info(f"[OANDA] Client initialized ({env})")
+        except Exception as e:
+            logger.error(f"[OANDA] Init error: {e}")
+
     def get_account_balance(self) -> float:
-        return 10000.0
+        try:
+            from oandapyV20.endpoints.accounts import AccountDetails
+            r = AccountDetails(self.account_id)
+            self._client.request(r)
+            return float(r.response["account"]["balance"])
+        except Exception as e:
+            logger.error(f"[OANDA] Balance error: {e}")
+            return 0.0
 
-    def get_open_positions(self) -> list[Position]:
+    def get_open_positions(self) -> list:
         return []
 
     def open_order(self, setup: TradeSetup) -> OrderResult:
-        logger.info(f"[DRY RUN] Would open: {setup.symbol} {setup.direction} size={setup.position_size:.0f} SL={setup.stop_loss:.5f} TP={setup.take_profit:.5f}")
-        return OrderResult(success=True, order_id="DRY_RUN_001", fill_price=setup.entry_price)
+        try:
+            from oandapyV20.endpoints.orders import OrderCreate
+            units = int(setup.position_size) if setup.direction == "buy" else -int(setup.position_size)
+            order_data = {"order": {
+                "type": "MARKET", "instrument": setup.symbol, "units": str(units),
+                "stopLossOnFill": {"price": f"{setup.stop_loss:.5f}"},
+                "takeProfitOnFill": {"price": f"{setup.take_profit:.5f}"},
+                "timeInForce": "FOK",
+            }}
+            r = OrderCreate(self.account_id, data=order_data)
+            self._client.request(r)
+            fill = r.response.get("orderFillTransaction", {})
+            return OrderResult(success=True, order_id=fill.get("id"), fill_price=float(fill.get("price", 0)))
+        except Exception as e:
+            return OrderResult(success=False, order_id=None, fill_price=0.0, error=str(e))
+
+    def close_position(self, symbol: str) -> OrderResult:
+        try:
+            from oandapyV20.endpoints.positions import PositionClose
+            r = PositionClose(self.account_id, symbol, data={"longUnits": "ALL", "shortUnits": "ALL"})
+            self._client.request(r)
+            return OrderResult(success=True, order_id=None, fill_price=0.0)
+        except Exception as e:
+            return OrderResult(success=False, order_id=None, fill_price=0.0, error=str(e))
+
+
+# ─── Dry-run ──────────────────────────────────────────────────────────────────
+
+class DryRunExecutor:
+    def get_account_balance(self) -> float:
+        return 10000.0
+
+    def get_open_positions(self) -> list:
+        return []
+
+    def open_order(self, setup: TradeSetup) -> OrderResult:
+        logger.info(
+            f"[DRY RUN] {setup.symbol} {setup.direction.upper()} "
+            f"size={setup.position_size:.2f} lots SL={setup.stop_loss:.5f} TP={setup.take_profit:.5f}"
+        )
+        return OrderResult(success=True, order_id="DRY-001", fill_price=setup.entry_price)
 
     def close_position(self, symbol: str) -> OrderResult:
         logger.info(f"[DRY RUN] Would close: {symbol}")
@@ -289,23 +307,27 @@ class DryRunExecutor:
 # ─── Factory ──────────────────────────────────────────────────────────────────
 
 def create_executor():
-    """Create the appropriate executor based on config."""
     if config.DRY_RUN:
-        logger.info("[Executor] DRY RUN mode — no real orders will be placed")
+        logger.info("[Executor] DRY RUN mode — no real orders")
         return DryRunExecutor()
 
-    if config.BROKER == "oanda":
-        return OANDAExecutor(
-            api_key=config.OANDA_API_KEY,
-            account_id=config.OANDA_ACCOUNT_ID,
-            env=config.OANDA_ENV,
-        )
-    elif config.BROKER == "mt5":
-        return MT5Executor(
+    if config.BROKER == "mt5":
+        host = __import__("os").getenv("MT5_HOST", "localhost")
+        port = int(__import__("os").getenv("MT5_PORT", "18812"))
+        ex = MT5Executor(
             login=config.MT5_LOGIN,
             password=config.MT5_PASSWORD,
             server=config.MT5_SERVER,
+            host=host,
+            port=port,
         )
-    else:
-        logger.warning(f"Unknown broker: {config.BROKER}, using dry run")
-        return DryRunExecutor()
+        if not ex._connected:
+            logger.warning("[Executor] MT5 not connected — falling back to DRY RUN")
+            return DryRunExecutor()
+        return ex
+
+    elif config.BROKER == "oanda":
+        return OANDAExecutor(config.OANDA_API_KEY, config.OANDA_ACCOUNT_ID, config.OANDA_ENV)
+
+    logger.warning(f"[Executor] Unknown broker '{config.BROKER}' — using DRY RUN")
+    return DryRunExecutor()

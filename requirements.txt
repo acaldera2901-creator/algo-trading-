@@ -1,14 +1,20 @@
-playwright==1.44.0
-anthropic==0.28.0
-pandas==2.2.2
-numpy==1.26.4
-ta==0.11.0
-yfinance==0.2.40
-oandapyV20==0.7.2
-scikit-learn==1.5.0
-optuna==3.6.1
-python-dotenv==1.0.1
-requests==2.32.3
-beautifulsoup4==4.12.3
-SQLAlchemy==2.0.30
-schedule==1.2.2
+anthropic>=0.28.0
+pandas>=2.0.0
+numpy>=1.26.0
+scikit-learn>=1.5.0
+optuna>=3.6.0
+python-dotenv>=1.0.0
+requests>=2.32.0
+beautifulsoup4>=4.12.0
+SQLAlchemy>=2.0.0
+schedule>=1.2.0
+pytz>=2024.1
+pyzmq>=27.0.0
+rpyc>=5.2.0
+mt5linux>=1.0.3
+
+# Optional — install manually if available on your OS:
+# MetaTrader5      (Windows only — for direct MT5 connection)
+# oandapyV20       (if using OANDA broker)
+# yfinance         (Linux: may fail due to build deps)
+# ta-lib           (technical analysis — install separately if needed)

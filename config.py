@@ -33,6 +33,8 @@ OANDA_ENV = os.getenv("OANDA_ENV", "practice")  # "practice" | "live"
 MT5_LOGIN = int(os.getenv("MT5_LOGIN", "0"))
 MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
 MT5_SERVER = os.getenv("MT5_SERVER", "")
+MT5_HOST = os.getenv("MT5_HOST", "localhost")   # rpyc bridge host
+MT5_PORT = int(os.getenv("MT5_PORT", "18812"))  # rpyc bridge port
 
 # ─── Risk Management (configurable, auto-tunable) ─────────────────────────────
 RISK_PER_TRADE_PCT = float(os.getenv("RISK_PER_TRADE_PCT", "1.0"))

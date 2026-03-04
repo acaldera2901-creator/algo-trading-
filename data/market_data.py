@@ -100,6 +100,60 @@ def _fetch_yfinance(symbol, timeframe, count):
         return pd.DataFrame()
 
 
+def _fetch_frankfurter(symbol: str, count: int) -> pd.DataFrame:
+    """
+    Fallback: fetch daily FX rates from frankfurter.app (free, no auth).
+    Converts close-only data into OHLCV by estimating O/H/L from daily volatility.
+    Used only when MT5/OANDA/yfinance are unavailable.
+    """
+    try:
+        import requests
+        from datetime import date, timedelta
+
+        # Parse symbol: EURUSD → EUR/USD
+        sym = symbol.replace("_", "").upper()
+        if len(sym) == 6:
+            base, quote = sym[:3], sym[3:]
+        else:
+            logger.error(f"Cannot parse symbol {symbol} for frankfurter")
+            return pd.DataFrame()
+
+        end = date.today()
+        start = end - timedelta(days=max(count * 2, 90))
+        url = f"https://api.frankfurter.app/{start}..{end}?from={base}&to={quote}"
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+
+        rows = []
+        rates_sorted = sorted(data["rates"].items())
+        closes = [v[quote] for _, v in rates_sorted if quote in v]
+
+        for i, (date_str, rate_dict) in enumerate(rates_sorted):
+            if quote not in rate_dict:
+                continue
+            close = rate_dict[quote]
+            # Estimate OHLCV from close using realistic daily volatility
+            vol = abs(closes[i] - closes[i - 1]) if i > 0 else close * 0.003
+            vol = max(vol, close * 0.001)
+            rows.append({
+                "timestamp": pd.Timestamp(date_str, tz="UTC"),
+                "open": round(close - vol * 0.3, 5),
+                "high": round(close + vol * 0.6, 5),
+                "low": round(close - vol * 0.6, 5),
+                "close": round(close, 5),
+                "volume": 1000,
+            })
+
+        df = pd.DataFrame(rows).set_index("timestamp")
+        df = df.tail(count)
+        logger.info(f"[Frankfurter] {len(df)} daily candles for {symbol} (dev fallback)")
+        return df
+    except Exception as e:
+        logger.error(f"Frankfurter fetch error: {e}")
+        return pd.DataFrame()
+
+
 # ─── SMC / ICT Calculations ───────────────────────────────────────────────────
 
 def find_swing_points(df: pd.DataFrame, window: int = 5) -> dict:
@@ -385,31 +439,39 @@ def get_market_snapshot(
     timeframe: str = "H1",
     count: int = 200,
     broker: str = "oanda",
+    mt5_executor=None,
     **broker_kwargs,
 ) -> MarketSnapshot:
     """
     Fetch market data and compute SMC indicators.
     Also fetches D1 data for daily bias calculation.
+    If mt5_executor is provided (MT5Executor instance), fetches candles directly from it.
     """
     df = pd.DataFrame()
+    df_d1 = pd.DataFrame()
 
-    if broker == "oanda":
+    if broker == "mt5" and mt5_executor is not None:
+        # Use MT5 executor directly (Linux bridge via mt5linux)
+        df = mt5_executor.get_candles(symbol, timeframe, count)
+        df_d1 = mt5_executor.get_candles(symbol, "D1", 30) if not df.empty else pd.DataFrame()
+    elif broker == "oanda":
         kw = {"api_key": broker_kwargs.get("api_key", ""),
               "account_id": broker_kwargs.get("account_id", ""),
               "env": broker_kwargs.get("env", "practice")}
         df = _fetch_oanda(symbol, timeframe, count, **kw)
         df_d1 = _fetch_oanda(symbol, "D1", 30, **kw) if not df.empty else pd.DataFrame()
-    elif broker == "mt5":
-        df = _fetch_mt5(symbol, timeframe, count)
-        df_d1 = _fetch_mt5(symbol, "D1", 30) if not df.empty else pd.DataFrame()
-    else:
-        df = pd.DataFrame()
-        df_d1 = pd.DataFrame()
 
     if df.empty:
-        logger.warning(f"Primary fetch failed, falling back to yfinance for {symbol}")
-        df = _fetch_yfinance(symbol, timeframe, count)
-        df_d1 = _fetch_yfinance(symbol, "D1", 30)
+        # Fallback chain: yfinance → frankfurter (daily, dev only)
+        logger.warning(f"Primary fetch failed, trying yfinance for {symbol}")
+        yf_symbol = symbol.replace("_", "")
+        df = _fetch_yfinance(yf_symbol, timeframe, count)
+        df_d1 = _fetch_yfinance(yf_symbol, "D1", 30) if not df.empty else pd.DataFrame()
+
+    if df.empty:
+        logger.warning(f"yfinance failed, using frankfurter.app daily fallback for {symbol}")
+        df = _fetch_frankfurter(symbol, count)
+        df_d1 = _fetch_frankfurter(symbol, 30) if not df.empty else pd.DataFrame()
 
     smc = compute_smc_indicators(df, df_d1)
     current_price = df["close"].iloc[-1] if not df.empty else 0.0
