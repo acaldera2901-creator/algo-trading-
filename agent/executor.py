@@ -307,6 +307,12 @@ class DryRunExecutor:
 # ─── Factory ──────────────────────────────────────────────────────────────────
 
 def create_executor():
+    if config.BROKER == "ea_bridge":
+        from agent.mt5_http_bridge import MT5BridgeServer, EABridgeExecutor
+        server = MT5BridgeServer(port=config.EA_BRIDGE_PORT)
+        server.start()
+        return EABridgeExecutor(server)
+
     if config.DRY_RUN:
         logger.info("[Executor] DRY RUN mode — no real orders")
         return DryRunExecutor()
@@ -328,12 +334,6 @@ def create_executor():
 
     elif config.BROKER == "oanda":
         return OANDAExecutor(config.OANDA_API_KEY, config.OANDA_ACCOUNT_ID, config.OANDA_ENV)
-
-    elif config.BROKER == "ea_bridge":
-        from agent.mt5_http_bridge import MT5BridgeServer, EABridgeExecutor
-        server = MT5BridgeServer(port=config.EA_BRIDGE_PORT)
-        server.start()
-        return EABridgeExecutor(server)
 
     logger.warning(f"[Executor] Unknown broker '{config.BROKER}' — using DRY RUN")
     return DryRunExecutor()
