@@ -1,0 +1,14 @@
+playwright==1.44.0
+anthropic==0.28.0
+pandas==2.2.2
+numpy==1.26.4
+ta==0.11.0
+yfinance==0.2.40
+oandapyV20==0.7.2
+scikit-learn==1.5.0
+optuna==3.6.1
+python-dotenv==1.0.1
+requests==2.32.3
+beautifulsoup4==4.12.3
+SQLAlchemy==2.0.30
+schedule==1.2.2

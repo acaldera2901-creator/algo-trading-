@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "last_updated": null,
+  "rules": [],
+  "risk_adjustments": {
+    "risk_per_trade_pct": null,
+    "sl_multiplier": null,
+    "tp_multiplier": null
+  },
+  "performance_stats": {
+    "total_trades": 0,
+    "winning_trades": 0,
+    "losing_trades": 0,
+    "win_rate": 0.0,
+    "avg_pnl": 0.0,
+    "best_patterns": [],
+    "worst_patterns": []
+  }
+}
