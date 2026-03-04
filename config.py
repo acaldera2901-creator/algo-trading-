@@ -36,6 +36,9 @@ MT5_SERVER = os.getenv("MT5_SERVER", "")
 MT5_HOST = os.getenv("MT5_HOST", "localhost")   # rpyc bridge host
 MT5_PORT = int(os.getenv("MT5_PORT", "18812"))  # rpyc bridge port
 
+# MT5 Mac bridge (MQL5 EA + HTTP)
+EA_BRIDGE_PORT = int(os.getenv("EA_BRIDGE_PORT", "8765"))  # HTTP bridge port
+
 # ─── Risk Management (configurable, auto-tunable) ─────────────────────────────
 RISK_PER_TRADE_PCT = float(os.getenv("RISK_PER_TRADE_PCT", "1.0"))
 MAX_DRAWDOWN_PCT = float(os.getenv("MAX_DRAWDOWN_PCT", "10.0"))

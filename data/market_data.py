@@ -454,6 +454,10 @@ def get_market_snapshot(
         # Use MT5 executor directly (Linux bridge via mt5linux)
         df = mt5_executor.get_candles(symbol, timeframe, count)
         df_d1 = mt5_executor.get_candles(symbol, "D1", 30) if not df.empty else pd.DataFrame()
+    elif broker == "ea_bridge" and mt5_executor is not None:
+        # Use EA HTTP bridge (Mac MT5 via MQL5 EA) — EA sends H1 candles
+        df = mt5_executor.get_candles_df(symbol, count)
+        # D1 falls through to frankfurter fallback below
     elif broker == "oanda":
         kw = {"api_key": broker_kwargs.get("api_key", ""),
               "account_id": broker_kwargs.get("account_id", ""),

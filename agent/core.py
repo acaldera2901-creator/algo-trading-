@@ -18,6 +18,10 @@ from datetime import datetime, timezone
 import config
 from agent.analyzer import analyze, Signal
 from agent.executor import create_executor, MT5Executor, DryRunExecutor, Position
+try:
+    from agent.mt5_http_bridge import EABridgeExecutor as _EABridgeExecutor
+except ImportError:
+    _EABridgeExecutor = None
 from agent.improver import init_trade_log, on_trade_closed
 from agent.risk_manager import RiskManager, RiskParams, TradeSetup
 from data.market_data import get_market_snapshot, MarketSnapshot
@@ -43,12 +47,20 @@ class TradingAgent:
 
     def _fetch_snapshot(self, symbol: str) -> MarketSnapshot:
         """Fetch market data — uses MT5 executor if connected, else yfinance."""
-        mt5_ex = self.executor if isinstance(self.executor, MT5Executor) else None
+        if _EABridgeExecutor is not None and isinstance(self.executor, _EABridgeExecutor):
+            broker = "ea_bridge"
+            mt5_ex = self.executor
+        elif isinstance(self.executor, MT5Executor):
+            broker = "mt5"
+            mt5_ex = self.executor
+        else:
+            broker = config.BROKER
+            mt5_ex = None
         return get_market_snapshot(
             symbol=symbol,
             timeframe=config.TIMEFRAME,
             count=200,
-            broker=config.BROKER,
+            broker=broker,
             mt5_executor=mt5_ex,
             api_key=config.OANDA_API_KEY,
             account_id=config.OANDA_ACCOUNT_ID,
