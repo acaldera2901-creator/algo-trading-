@@ -1,11 +1,11 @@
 """
 Market data ingestion module.
-Fetches OHLCV data from OANDA or MT5, computes technical indicators.
+Fetches OHLCV data from OANDA or MT5 and computes SMC/ICT indicators aligned with the course.
 """
 
 import logging
-from datetime import datetime, timezone
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import pandas as pd
 import numpy as np
@@ -14,167 +14,368 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class Candle:
-    symbol: str
-    timestamp: datetime
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
-
-
-@dataclass
 class MarketSnapshot:
     symbol: str
     candles: pd.DataFrame          # columns: open, high, low, close, volume
     indicators: dict = field(default_factory=dict)
+    smc: dict = field(default_factory=dict)    # SMC-specific data
     current_price: float = 0.0
     spread: float = 0.0
+    session: str = ""              # asian | london | new_york | off
+
+
+# ─── Session Detection ────────────────────────────────────────────────────────
+
+def get_current_session() -> str:
+    now = datetime.now(timezone.utc)
+    hour = now.hour
+    if 0 <= hour < 8:
+        return "asian"
+    elif 8 <= hour < 13:
+        return "london"
+    elif 13 <= hour < 22:
+        return "new_york"
+    return "off"
 
 
 # ─── OANDA Fetcher ────────────────────────────────────────────────────────────
 
-def _fetch_oanda(symbol: str, timeframe: str, count: int, api_key: str, account_id: str, env: str) -> pd.DataFrame:
+def _fetch_oanda(symbol, timeframe, count, api_key, account_id, env):
     try:
         from oandapyV20 import API
         from oandapyV20.endpoints.instruments import InstrumentsCandles
-
         client = API(access_token=api_key, environment=env)
         gran_map = {"M1": "M1", "M5": "M5", "M15": "M15", "H1": "H1", "H4": "H4", "D1": "D"}
-        granularity = gran_map.get(timeframe, "H1")
-
-        params = {"granularity": granularity, "count": count, "price": "M"}
+        params = {"granularity": gran_map.get(timeframe, "H1"), "count": count, "price": "M"}
         r = InstrumentsCandles(instrument=symbol, params=params)
         client.request(r)
-
         rows = []
         for c in r.response["candles"]:
             if c["complete"]:
                 mid = c["mid"]
                 rows.append({
                     "timestamp": pd.to_datetime(c["time"]),
-                    "open": float(mid["o"]),
-                    "high": float(mid["h"]),
-                    "low": float(mid["l"]),
-                    "close": float(mid["c"]),
+                    "open": float(mid["o"]), "high": float(mid["h"]),
+                    "low": float(mid["l"]), "close": float(mid["c"]),
                     "volume": float(c["volume"]),
                 })
         df = pd.DataFrame(rows).set_index("timestamp")
-        logger.info(f"OANDA: fetched {len(df)} candles for {symbol}")
+        logger.info(f"OANDA: {len(df)} candles for {symbol} {timeframe}")
         return df
     except Exception as e:
         logger.error(f"OANDA fetch error: {e}")
         return pd.DataFrame()
 
 
-# ─── MT5 Fetcher ──────────────────────────────────────────────────────────────
-
-def _fetch_mt5(symbol: str, timeframe: str, count: int) -> pd.DataFrame:
+def _fetch_mt5(symbol, timeframe, count):
     try:
         import MetaTrader5 as mt5
-        tf_map = {
-            "M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5,
-            "M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1,
-            "H4": mt5.TIMEFRAME_H4, "D1": mt5.TIMEFRAME_D1,
-        }
-        tf = tf_map.get(timeframe, mt5.TIMEFRAME_H1)
-        rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
+        tf_map = {"M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5,
+                  "M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1,
+                  "H4": mt5.TIMEFRAME_H4, "D1": mt5.TIMEFRAME_D1}
+        rates = mt5.copy_rates_from_pos(symbol, tf_map.get(timeframe, mt5.TIMEFRAME_H1), 0, count)
         if rates is None:
-            logger.error(f"MT5: no data for {symbol}")
             return pd.DataFrame()
         df = pd.DataFrame(rates)
         df["timestamp"] = pd.to_datetime(df["time"], unit="s", utc=True)
-        df = df.set_index("timestamp")[["open", "high", "low", "close", "tick_volume"]].rename(
-            columns={"tick_volume": "volume"}
-        )
-        logger.info(f"MT5: fetched {len(df)} candles for {symbol}")
-        return df
+        return df.set_index("timestamp")[["open", "high", "low", "close", "tick_volume"]].rename(
+            columns={"tick_volume": "volume"})
     except Exception as e:
         logger.error(f"MT5 fetch error: {e}")
         return pd.DataFrame()
 
 
-# ─── Fallback: yfinance ───────────────────────────────────────────────────────
-
-def _fetch_yfinance(symbol: str, timeframe: str, count: int) -> pd.DataFrame:
+def _fetch_yfinance(symbol, timeframe, count):
     try:
         import yfinance as yf
         tf_map = {"M1": "1m", "M5": "5m", "M15": "15m", "H1": "1h", "H4": "4h", "D1": "1d"}
         period_map = {"M1": "7d", "M5": "7d", "M15": "60d", "H1": "60d", "H4": "60d", "D1": "2y"}
-        interval = tf_map.get(timeframe, "1h")
-        period = period_map.get(timeframe, "60d")
-
         yf_symbol = symbol.replace("_", "=X") if "_" in symbol else symbol + "=X"
-        df = yf.download(yf_symbol, period=period, interval=interval, progress=False)
+        df = yf.download(yf_symbol, period=period_map.get(timeframe, "60d"),
+                         interval=tf_map.get(timeframe, "1h"), progress=False)
         df.columns = [c.lower() for c in df.columns]
-        df = df[["open", "high", "low", "close", "volume"]].tail(count)
-        logger.info(f"yfinance: fetched {len(df)} candles for {symbol}")
-        return df
+        return df[["open", "high", "low", "close", "volume"]].tail(count)
     except Exception as e:
         logger.error(f"yfinance fetch error: {e}")
         return pd.DataFrame()
 
 
-# ─── Indicators ───────────────────────────────────────────────────────────────
+# ─── SMC / ICT Calculations ───────────────────────────────────────────────────
 
-def compute_indicators(df: pd.DataFrame) -> dict:
-    """Compute technical indicators on a OHLCV DataFrame."""
-    if df.empty or len(df) < 20:
+def find_swing_points(df: pd.DataFrame, window: int = 5) -> dict:
+    """Find swing highs and lows (BSL/SSL liquidity levels)."""
+    highs = df["high"]
+    lows = df["low"]
+    n = len(df)
+
+    swing_highs = []
+    swing_lows = []
+
+    for i in range(window, n - window):
+        if highs.iloc[i] == highs.iloc[i - window:i + window + 1].max():
+            swing_highs.append({"index": i, "price": highs.iloc[i], "time": df.index[i]})
+        if lows.iloc[i] == lows.iloc[i - window:i + window + 1].min():
+            swing_lows.append({"index": i, "price": lows.iloc[i], "time": df.index[i]})
+
+    return {
+        "swing_highs": swing_highs[-5:],   # last 5 swing highs (BSL)
+        "swing_lows": swing_lows[-5:],     # last 5 swing lows (SSL)
+        "last_bsl": swing_highs[-1]["price"] if swing_highs else None,
+        "last_ssl": swing_lows[-1]["price"] if swing_lows else None,
+    }
+
+
+def detect_market_structure(df: pd.DataFrame, window: int = 5) -> dict:
+    """
+    Detect BOS (Break of Structure) and ChoCH (Change of Character).
+    Returns trend direction and last structure event.
+    """
+    swings = find_swing_points(df, window)
+    highs = [s["price"] for s in swings["swing_highs"]]
+    lows = [s["price"] for s in swings["swing_lows"]]
+
+    trend = "unknown"
+    last_event = "none"
+
+    if len(highs) >= 2 and len(lows) >= 2:
+        # Uptrend: HH + HL
+        if highs[-1] > highs[-2] and lows[-1] > lows[-2]:
+            trend = "up"
+            last_event = "HH_HL"
+        # Downtrend: LH + LL
+        elif highs[-1] < highs[-2] and lows[-1] < lows[-2]:
+            trend = "down"
+            last_event = "LH_LL"
+        # Potential ChoCH: was uptrend, now LL forming
+        elif highs[-1] > highs[-2] and lows[-1] < lows[-2]:
+            trend = "choch_bearish"
+            last_event = "ChoCH_bearish"
+        # Potential ChoCH: was downtrend, now HH forming
+        elif highs[-1] < highs[-2] and lows[-1] > lows[-2]:
+            trend = "choch_bullish"
+            last_event = "ChoCH_bullish"
+
+    # Check for BOS (price closing beyond last swing high/low)
+    last_close = df["close"].iloc[-1]
+    if highs and last_close > highs[-1]:
+        last_event = "BOS_bullish"
+    elif lows and last_close < lows[-1]:
+        last_event = "BOS_bearish"
+
+    return {
+        "trend": trend,
+        "last_event": last_event,
+        "swing_highs": highs,
+        "swing_lows": lows,
+    }
+
+
+def detect_fair_value_gaps(df: pd.DataFrame) -> list:
+    """
+    FVG (Fair Value Gap): 3-candle pattern where candle 1 high < candle 3 low (bullish)
+    or candle 1 low > candle 3 high (bearish).
+    """
+    fvgs = []
+    for i in range(2, len(df)):
+        c1 = df.iloc[i - 2]
+        c3 = df.iloc[i]
+        # Bullish FVG
+        if c1["high"] < c3["low"]:
+            fvgs.append({
+                "type": "bullish",
+                "top": c3["low"],
+                "bottom": c1["high"],
+                "time": df.index[i],
+                "mitigated": False,
+            })
+        # Bearish FVG
+        elif c1["low"] > c3["high"]:
+            fvgs.append({
+                "type": "bearish",
+                "top": c1["low"],
+                "bottom": c3["high"],
+                "time": df.index[i],
+                "mitigated": False,
+            })
+
+    # Mark mitigated FVGs (price has returned into the gap)
+    current_price = df["close"].iloc[-1]
+    for fvg in fvgs:
+        if fvg["type"] == "bullish" and current_price <= fvg["top"]:
+            fvg["mitigated"] = True
+        elif fvg["type"] == "bearish" and current_price >= fvg["bottom"]:
+            fvg["mitigated"] = True
+
+    # Return only recent unmitigated FVGs (last 10)
+    unmitigated = [f for f in fvgs if not f["mitigated"]][-10:]
+    return unmitigated
+
+
+def detect_order_blocks(df: pd.DataFrame) -> list:
+    """
+    Order Block: last bearish candle before a bullish impulse (bullish OB)
+    or last bullish candle before a bearish impulse (bearish OB).
+    """
+    obs = []
+    threshold = 0.002  # 0.2% move to qualify as impulse
+
+    for i in range(1, len(df) - 1):
+        curr = df.iloc[i]
+        next_c = df.iloc[i + 1]
+        prev = df.iloc[i - 1]
+
+        # Bullish OB: bearish candle followed by strong bullish impulse
+        if (curr["close"] < curr["open"] and  # bearish candle
+                next_c["close"] > next_c["open"] and  # next is bullish
+                (next_c["close"] - next_c["open"]) / curr["open"] > threshold):
+            obs.append({
+                "type": "bullish",
+                "top": curr["open"],
+                "bottom": curr["low"],
+                "time": df.index[i],
+            })
+
+        # Bearish OB: bullish candle followed by strong bearish impulse
+        elif (curr["close"] > curr["open"] and  # bullish candle
+              next_c["close"] < next_c["open"] and  # next is bearish
+              (next_c["open"] - next_c["close"]) / curr["open"] > threshold):
+            obs.append({
+                "type": "bearish",
+                "top": curr["high"],
+                "bottom": curr["open"],
+                "time": df.index[i],
+            })
+
+    return obs[-5:]  # last 5 order blocks
+
+
+def get_daily_bias(df_d1: pd.DataFrame) -> dict:
+    """
+    ICT Daily Bias: determines the expected direction for the day.
+    Based on daily open price and recent D1 structure.
+    """
+    if df_d1.empty or len(df_d1) < 5:
+        return {"bias": "neutral", "daily_open": None}
+
+    daily_open = df_d1["open"].iloc[-1]
+    current_close = df_d1["close"].iloc[-1]
+    prev_high = df_d1["high"].iloc[-2]
+    prev_low = df_d1["low"].iloc[-2]
+
+    structure = detect_market_structure(df_d1)
+    trend = structure["trend"]
+
+    if trend in ("up", "choch_bullish") and current_close > daily_open:
+        bias = "bullish"
+    elif trend in ("down", "choch_bearish") and current_close < daily_open:
+        bias = "bearish"
+    elif current_close > daily_open and current_close > prev_high:
+        bias = "bullish"
+    elif current_close < daily_open and current_close < prev_low:
+        bias = "bearish"
+    else:
+        bias = "neutral"
+
+    return {
+        "bias": bias,
+        "daily_open": daily_open,
+        "trend_d1": trend,
+        "prev_high_d1": prev_high,
+        "prev_low_d1": prev_low,
+    }
+
+
+def compute_atr(df: pd.DataFrame, period: int = 14) -> float:
+    """Average True Range."""
+    if len(df) < period:
+        return 0.0
+    high = df["high"]
+    low = df["low"]
+    close = df["close"]
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low - close.shift()).abs(),
+    ], axis=1).max(axis=1)
+    return tr.rolling(period).mean().iloc[-1]
+
+
+def compute_smc_indicators(df: pd.DataFrame, df_d1: pd.DataFrame = None) -> dict:
+    """
+    Full SMC indicator set aligned with the Space Traders Academy course.
+    """
+    if df.empty or len(df) < 10:
         return {}
-    try:
-        import ta
-        close = df["close"]
-        high = df["high"]
-        low = df["low"]
-        volume = df["volume"]
 
-        indicators = {}
+    close = df["close"]
+    high = df["high"]
+    low = df["low"]
 
-        # Trend
-        indicators["ema_20"] = ta.trend.ema_indicator(close, window=20).iloc[-1]
-        indicators["ema_50"] = ta.trend.ema_indicator(close, window=50).iloc[-1] if len(df) >= 50 else None
-        indicators["ema_200"] = ta.trend.ema_indicator(close, window=200).iloc[-1] if len(df) >= 200 else None
+    ind = {}
 
-        # Momentum
-        rsi = ta.momentum.RSIIndicator(close, window=14)
-        indicators["rsi"] = rsi.rsi().iloc[-1]
+    # Price
+    ind["current_close"] = close.iloc[-1]
+    ind["prev_close"] = close.iloc[-2]
+    ind["atr"] = compute_atr(df)
 
-        macd = ta.trend.MACD(close)
-        indicators["macd"] = macd.macd().iloc[-1]
-        indicators["macd_signal"] = macd.macd_signal().iloc[-1]
-        indicators["macd_diff"] = macd.macd_diff().iloc[-1]
+    # Market structure
+    structure = detect_market_structure(df)
+    ind["trend"] = structure["trend"]
+    ind["last_bos_choch"] = structure["last_event"]
+    ind["swing_highs"] = structure["swing_highs"]
+    ind["swing_lows"] = structure["swing_lows"]
 
-        # Volatility
-        bb = ta.volatility.BollingerBands(close)
-        indicators["bb_upper"] = bb.bollinger_hband().iloc[-1]
-        indicators["bb_lower"] = bb.bollinger_lband().iloc[-1]
-        indicators["bb_middle"] = bb.bollinger_mavg().iloc[-1]
-        indicators["bb_width"] = indicators["bb_upper"] - indicators["bb_lower"]
+    # Swing points (liquidity levels)
+    swings = find_swing_points(df)
+    ind["bsl"] = swings["last_bsl"]   # Buy Side Liquidity (above)
+    ind["ssl"] = swings["last_ssl"]   # Sell Side Liquidity (below)
 
-        atr = ta.volatility.AverageTrueRange(high, low, close, window=14)
-        indicators["atr"] = atr.average_true_range().iloc[-1]
+    # FVG (unmitigated)
+    fvgs = detect_fair_value_gaps(df)
+    ind["fvg_bullish"] = [f for f in fvgs if f["type"] == "bullish"]
+    ind["fvg_bearish"] = [f for f in fvgs if f["type"] == "bearish"]
+    ind["nearest_bullish_fvg"] = fvgs[-1] if fvgs and fvgs[-1]["type"] == "bullish" else None
+    ind["nearest_bearish_fvg"] = fvgs[-1] if fvgs and fvgs[-1]["type"] == "bearish" else None
 
-        # Current price context
-        indicators["current_close"] = close.iloc[-1]
-        indicators["prev_close"] = close.iloc[-2]
-        indicators["price_change_pct"] = (close.iloc[-1] - close.iloc[-2]) / close.iloc[-2] * 100
+    # Order blocks
+    obs = detect_order_blocks(df)
+    ind["order_blocks"] = obs
+    ind["nearest_bullish_ob"] = next((o for o in reversed(obs) if o["type"] == "bullish"), None)
+    ind["nearest_bearish_ob"] = next((o for o in reversed(obs) if o["type"] == "bearish"), None)
 
-        # Support / Resistance (simple: recent swing highs/lows)
-        window = min(20, len(df))
-        indicators["recent_high"] = high.tail(window).max()
-        indicators["recent_low"] = low.tail(window).min()
+    # Daily bias (if D1 data provided)
+    if df_d1 is not None and not df_d1.empty:
+        daily = get_daily_bias(df_d1)
+        ind["daily_bias"] = daily["bias"]
+        ind["daily_open"] = daily["daily_open"]
+        ind["trend_d1"] = daily.get("trend_d1", "unknown")
+    else:
+        ind["daily_bias"] = "unknown"
+        ind["daily_open"] = None
 
-        # Trend direction
-        if indicators["ema_20"] and indicators["ema_50"]:
-            indicators["trend"] = "up" if indicators["ema_20"] > indicators["ema_50"] else "down"
-        else:
-            indicators["trend"] = "unknown"
+    # Session
+    ind["session"] = get_current_session()
 
-        return indicators
-    except Exception as e:
-        logger.error(f"Indicator computation error: {e}")
-        return {}
+    # Liquidity sweep detection
+    # Check if price recently swept a swing high or low (LIT / SLQ signal)
+    last_20_high = high.tail(20).max()
+    last_20_low = low.tail(20).min()
+    bsl_val = ind["bsl"] or last_20_high
+    ssl_val = ind["ssl"] or last_20_low
+
+    recent_high = high.tail(5).max()
+    recent_low = low.tail(5).min()
+
+    ind["swept_bsl"] = recent_high >= bsl_val  # swept buy side liquidity
+    ind["swept_ssl"] = recent_low <= ssl_val   # swept sell side liquidity
+
+    # Price relative to daily open
+    if ind["daily_open"]:
+        ind["above_daily_open"] = ind["current_close"] > ind["daily_open"]
+    else:
+        ind["above_daily_open"] = None
+
+    return ind
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
@@ -187,31 +388,37 @@ def get_market_snapshot(
     **broker_kwargs,
 ) -> MarketSnapshot:
     """
-    Fetch market data and compute indicators.
-    Returns a MarketSnapshot ready for analysis.
+    Fetch market data and compute SMC indicators.
+    Also fetches D1 data for daily bias calculation.
     """
     df = pd.DataFrame()
 
     if broker == "oanda":
-        df = _fetch_oanda(
-            symbol, timeframe, count,
-            broker_kwargs.get("api_key", ""),
-            broker_kwargs.get("account_id", ""),
-            broker_kwargs.get("env", "practice"),
-        )
+        kw = {"api_key": broker_kwargs.get("api_key", ""),
+              "account_id": broker_kwargs.get("account_id", ""),
+              "env": broker_kwargs.get("env", "practice")}
+        df = _fetch_oanda(symbol, timeframe, count, **kw)
+        df_d1 = _fetch_oanda(symbol, "D1", 30, **kw) if not df.empty else pd.DataFrame()
     elif broker == "mt5":
         df = _fetch_mt5(symbol, timeframe, count)
+        df_d1 = _fetch_mt5(symbol, "D1", 30) if not df.empty else pd.DataFrame()
+    else:
+        df = pd.DataFrame()
+        df_d1 = pd.DataFrame()
 
     if df.empty:
         logger.warning(f"Primary fetch failed, falling back to yfinance for {symbol}")
         df = _fetch_yfinance(symbol, timeframe, count)
+        df_d1 = _fetch_yfinance(symbol, "D1", 30)
 
-    indicators = compute_indicators(df)
+    smc = compute_smc_indicators(df, df_d1)
     current_price = df["close"].iloc[-1] if not df.empty else 0.0
 
     return MarketSnapshot(
         symbol=symbol,
         candles=df,
-        indicators=indicators,
+        indicators=smc,
+        smc=smc,
         current_price=current_price,
+        session=get_current_session(),
     )

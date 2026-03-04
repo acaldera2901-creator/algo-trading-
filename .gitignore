@@ -10,6 +10,6 @@ build/
 .venv/
 venv/
 *.db
-knowledge/course_knowledge.json
+# knowledge/course_knowledge.json  # tracked — built from scraper
 *.log
 .playwright/

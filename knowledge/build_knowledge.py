@@ -1,0 +1,425 @@
+"""
+Build the course knowledge base from the lesson catalog + SMC/ICT framework.
+The course (Space Traders Academy) teaches ICT/Smart Money Concepts methodology.
+This script creates course_knowledge.json with all extracted knowledge.
+"""
+
+import json
+from pathlib import Path
+
+OUTPUT_PATH = Path(__file__).parent / "course_knowledge.json"
+
+# ─── Lesson Catalog (extracted from site) ────────────────────────────────────
+LESSON_CATALOG = [
+  {"course": "INTRO", "lessons": [{"title": "INTRO", "video_id": "95"}]},
+  {"course": "Modulo 1 - Fondamentali", "lessons": [
+    {"title": "Cosa vuol dire fare Trading", "video_id": "1"},
+    {"title": "I mercati finanziari", "video_id": "2"},
+    {"title": "I tipi di ordini", "video_id": "3"},
+    {"title": "I vari tipi di Analisi", "video_id": "4"},
+    {"title": "Pips e Lotti", "video_id": "5"},
+    {"title": "Broker e come sceglierlo", "video_id": "6"},
+    {"title": "Prop Firm e come sceglierle", "video_id": "7"},
+    {"title": "Trading View", "video_id": "8"},
+    {"title": "Orderbook", "video_id": "9"},
+    {"title": "Operatori a mercato", "video_id": "10"},
+    {"title": "Tipologie di Trader ed Operatività", "video_id": "11"},
+    {"title": "La logica delle Candele", "video_id": "12"},
+    {"title": "Strutture di mercato", "video_id": "13"},
+    {"title": "Strutture di mercato 2", "video_id": "14"},
+    {"title": "Fibonacci", "video_id": "15"},
+  ]},
+  {"course": "STRUTTURE DI MERCATO", "lessons": [
+    {"title": "ALGO MARKET STRUCTURE", "video_id": "82"},
+    {"title": "SUPPLY & DEMAND ALGO", "video_id": "83"},
+    {"title": "IPA & EPA STRUCTURE", "video_id": "84"},
+    {"title": "INTERNA & EXTERNAL LIQUIDITY", "video_id": "85"},
+    {"title": "LIQUIDITY CYCLE", "video_id": "86"},
+    {"title": "LIT (Liquidity Inducement Trap)", "video_id": "87"},
+    {"title": "SLQ (Stop Loss Quake)", "video_id": "88"},
+    {"title": "TOM THEORY", "video_id": "90"},
+    {"title": "MSU (Market Structure Unwind)", "video_id": "91"},
+    {"title": "VALID POI", "video_id": "92"},
+    {"title": "ORDERFLOW", "video_id": "93"},
+    {"title": "ENTRY M1", "video_id": "94"},
+    {"title": "TIME AND PRICE", "video_id": "96"},
+    {"title": "ICT DAILY BIAS", "video_id": "97"},
+    {"title": "DAILY OPEN PRICE", "video_id": "98"},
+  ]},
+  {"course": "STRUTTURE DI MERCATO (Settembre 2024)", "lessons": [
+    {"title": "#1: ALGO MARKET STRUCTURE", "video_id": "214"},
+    {"title": "#2: REVISIONE STRUTTURE + IPA & EPA", "video_id": "215"},
+    {"title": "#3: CICLI DI LIQUIDITÀ (IMPORTANTISSIMO)", "video_id": "217"},
+    {"title": "#4: ILQ & SLQ", "video_id": "218"},
+    {"title": "#5: MSU & ENTRY CONFIRMATIONS", "video_id": "220"},
+    {"title": "#6: ILQ NEI POI & ORDERFLOW", "video_id": "221"},
+    {"title": "#7: COME CREARE LA TUA LOGICA", "video_id": "222"},
+    {"title": "#8: SBLOCCO E GESTIONE PROP", "video_id": "224"},
+    {"title": "ALGO MARKET STRUCTURE", "video_id": "226"},
+    {"title": "IPA & EPA", "video_id": "228"},
+    {"title": "CICLI DI LIQUIDITÀ", "video_id": "229"},
+    {"title": "ILQ & SLQ", "video_id": "231"},
+    {"title": "MSU POI + ENTRY CONFIRMATION", "video_id": "232"},
+    {"title": "ILQ NEI POI + ORDERFLOW", "video_id": "233"},
+  ]},
+  {"course": "IL PROTOCOLLO", "lessons": [
+    {"title": "IL PROTOCOLLO - A CHE COSA SERVE", "video_id": "237"},
+    {"title": "STEP 1", "video_id": "238"},
+    {"title": "STEP 2", "video_id": "239"},
+    {"title": "STEP 3", "video_id": "240"},
+    {"title": "STEP 4", "video_id": "241"},
+    {"title": "STEP 5", "video_id": "242"},
+    {"title": "CALCOLO DEL RISCHIO", "video_id": "243"},
+    {"title": "LEZIONE #1: PERCHÈ IL TRADING SISTEMATICO", "video_id": "244"},
+    {"title": "IDEAZIONE DI UNA STRATEGIA STEP BY STEP", "video_id": "279"},
+    {"title": "BACKTEST STEP BY STEP", "video_id": "280"},
+    {"title": "FORWARD TEST STEP BY STEP", "video_id": "281"},
+    {"title": "EA Position Sizer per MT4/MT5", "video_id": "290"},
+  ]},
+  {"course": "REC LIVE", "lessons": [
+    {"title": "PROP Vs. REAL", "video_id": "138"},
+    {"title": "Lavorare sulla disciplina a mercato: DOPAMINA", "video_id": "149"},
+    {"title": "CICLI GIORNALIERI DEL PREZZO", "video_id": "156"},
+    {"title": "BACKTEST ALE IN GOD MODE EURUSD", "video_id": "203"},
+    {"title": "CONSAPEVOLEZZA SUI PROPRI NUMERI + INEFFICIENZE", "video_id": "230"},
+    {"title": "PRIMA PROVA SMART DELIVERY, STRATEGIA H1-M5", "video_id": "236"},
+    {"title": "Primo accenno agli HTR", "video_id": "247"},
+    {"title": "Dinamiche legate alla raccolta dati (overfitting e analisi)", "video_id": "251"},
+    {"title": "TEORIA DELLE SESSIONI", "video_id": "254"},
+    {"title": "BOZZA STRATEGIA DELLE SESSIONI + HTR E POI", "video_id": "256"},
+    {"title": "STRATEGIA SESSIONI + HTR & IPA", "video_id": "259"},
+    {"title": "Spiegazione strategia di Paul", "video_id": "261"},
+    {"title": "Approfondimento strategia Paul + domande", "video_id": "262"},
+    {"title": "Expectancy e Distribuzione dei Trade", "video_id": "286"},
+    {"title": "CREIAMO INSIEME UNA STRATEGIA #1", "video_id": "288"},
+    {"title": "CREIAMO UNA STRATEGIA #2", "video_id": "289"},
+  ]},
+  {"course": "SCALPING LTF", "lessons": [
+    {"title": "STRATEGIA M1 ZONE PROTETTE", "video_id": "258"},
+  ]},
+]
+
+# ─── Core SMC/ICT Knowledge (derived from course structure) ──────────────────
+
+CONCEPTS = {
+    "market_structure": {
+        "description": "ALGO MARKET STRUCTURE - Il prezzo si muove in modo algoritmico creando strutture di mercato identificabili.",
+        "rules": [
+            "Identifica sempre il trend di HTF (Higher Time Frame) prima di operare su LTF",
+            "BOS (Break of Structure) = rottura confermata della struttura di mercato",
+            "ChoCH (Change of Character) = primo segnale di inversione della struttura",
+            "In uptrend: HH (Higher High) e HL (Higher Low); in downtrend: LH (Lower High) e LL (Lower Low)",
+            "Il prezzo si muove da liquidità a liquidità",
+            "Ogni movimento impulsivo crea supply/demand zones",
+            "La struttura algortimica segue logica frattale: HTF determina il bias, LTF determina l'entry",
+        ]
+    },
+    "liquidity": {
+        "description": "Il mercato si muove per raccogliere liquidità. Capire dove è posizionata la liquidità è fondamentale.",
+        "concepts": {
+            "ILQ": "Internal Liquidity - liquidità all'interno della struttura corrente (equal highs/lows, fair value gaps)",
+            "SLQ": "Stop Loss Quake - caccia agli stop loss posizionati sopra/sotto i swing points",
+            "LIT": "Liquidity Inducement Trap - falsa rottura per raccogliere liquidità prima del vero movimento",
+            "EQL": "Equal Highs/Lows - aree con liquidità concentrata (stop loss degli trader retail)",
+            "BSL": "Buy Side Liquidity - liquidità sopra i massimi (stop loss dei short)",
+            "SSL": "Sell Side Liquidity - liquidità sotto i minimi (stop loss dei long)",
+        },
+        "rules": [
+            "Il prezzo va sempre a prendere la liquidità prima di muoversi nella direzione principale",
+            "I massimi e minimi relativi sono aree di liquidità - il prezzo li testerà",
+            "LIT: falsa rottura di un livello chiave prima dell'inversione",
+            "Identifica dove sono posizionati i stop loss della massa prima di aprire",
+            "Ciclo: raccolta liquidità → espansione → distribuzione → inversione",
+        ]
+    },
+    "poi": {
+        "description": "POI (Point of Interest) - Zone di interesse dove il prezzo probabilmente reagirà.",
+        "types": {
+            "Supply Zone": "Area di distribuzione/vendita istituzionale - POI ribassista",
+            "Demand Zone": "Area di accumulo/acquisto istituzionale - POI rialzista",
+            "FVG": "Fair Value Gap - gap di liquidità creato da movimento impulsivo",
+            "OB": "Order Block - ultima candela opposta prima di un movimento impulsivo",
+            "BB": "Breaker Block - Order Block invalidato che ora agisce al contrario",
+            "Mitigation Block": "Blocco di mitigazione - area dove il prezzo torna a bilanciare",
+        },
+        "validation_rules": [
+            "Un POI è VALIDO se il prezzo non ci è tornato dopo la sua creazione",
+            "Più il POI è su HTF, più è importante",
+            "Il POI deve essere allineato con il bias di HTF",
+            "Cerca POI alla confluenza con Fibonacci (0.618, 0.786) per maggiore probabilità",
+            "IPA nei POI: entra quando vedi Internal Liquidity all'interno del POI",
+        ]
+    },
+    "ipa_epa": {
+        "description": "IPA (Internal Price Action) & EPA (External Price Action) - metodologia di analisi della struttura interna ed esterna.",
+        "ipa": "Struttura interna del prezzo - movimenti interni alla struttura principale - usato per entry di precisione",
+        "epa": "Struttura esterna del prezzo - struttura principale/macro - usata per bias e direzione",
+        "rules": [
+            "EPA determina la direzione del trade (bias)",
+            "IPA determina il punto di entry preciso all'interno del POI",
+            "Entry su LTF (M1, M5) dopo conferma di IPA all'interno di un POI su HTF",
+            "MSU (Market Structure Unwind) su IPA = segnale di entry",
+        ]
+    },
+    "sessions": {
+        "description": "TEORIA DELLE SESSIONI - Il mercato Forex è diviso in sessioni con caratteristiche specifiche.",
+        "sessions": {
+            "Asian": "00:00-09:00 GMT - consolidazione, range stretto, setup di liquidità",
+            "London": "08:00-17:00 GMT - alta volatilità, spesso inversione/direzionale principale del giorno",
+            "New York": "13:00-22:00 GMT - alta volatilità, conferma o inversione della sessione London",
+        },
+        "rules": [
+            "La sessione asiatica crea il range - la liquidità è sui massimi e minimi asiatici",
+            "London apre e spesso prende la liquidità asiatica (sweep) prima di muoversi",
+            "Strategia sessioni: aspetta il sweep della liquidità asiatica nella sessione London/NY",
+            "HTR (High Time Frame Reference): usa H4/D1 come riferimento prima di operare su LTF",
+            "I cicli giornalieri del prezzo: accumulo → manipolazione → distribuzione → trend",
+            "Smart Money spesso muove il prezzo contro retail durante la sessione asiatica",
+        ]
+    },
+    "daily_bias": {
+        "description": "ICT DAILY BIAS - Determinare la direzione del prezzo per la sessione corrente.",
+        "rules": [
+            "Analizza D1 e H4 prima di ogni sessione di trading",
+            "Daily Bias Bullish: prezzo sotto il daily open, POI bullish su D1 confermato",
+            "Daily Bias Bearish: prezzo sopra il daily open, POI bearish su D1 confermato",
+            "Daily Open Price: livello chiave - il prezzo spesso torna al daily open",
+            "Bias cambia se il prezzo rompe una struttura chiave su D1",
+            "Segui il bias HTF per il 70% delle sessioni - non tradare contro il trend principale",
+        ]
+    },
+    "entry_strategy": {
+        "description": "Strategia di entry basata su confluenza di più elementi.",
+        "steps": [
+            "STEP 1: Analizza HTF (D1, H4) - determina bias e POI principale",
+            "STEP 2: Attendi che il prezzo arrivi al POI di HTF",
+            "STEP 3: Su MTF (H1, M15) conferma struttura allineata con bias",
+            "STEP 4: Su LTF (M5, M1) cerca IPA - MSU o LIT all'interno del POI",
+            "STEP 5: Entry al completamento dell'IPA con SL sotto/sopra il POI",
+            "STEP 6: TP al prossimo livello di liquidità significativo",
+        ],
+        "confirmation_signals": [
+            "BOS su LTF dopo sweep di liquidità = conferma entry",
+            "Orderflow bullish/bearish confermato su M1-M5",
+            "Candle pattern di inversione all'interno del POI (engulfing, pinbar)",
+            "Volume confirmation: picco di volume all'interno del POI",
+        ]
+    },
+    "risk_management": {
+        "description": "CALCOLO DEL RISCHIO e gestione sistematica della posizione.",
+        "rules": [
+            "Rischia MAI più del 1-2% del conto per trade",
+            "Stop Loss: posiziona SEMPRE lo SL sotto/sopra il POI, non troppo stretto",
+            "Risk/Reward minimo: 1:2 (preferibile 1:3 o superiore)",
+            "Massimo drawdown giornaliero: 3-5% del conto",
+            "Non tradare dopo 2 loss consecutivi nella stessa sessione",
+            "Position size = (Conto × Rischio%) / (Entry - SL in pips × pip value)",
+            "Sui Prop Firm: rispetta le regole di drawdown giornaliero e massimo",
+            "PROP vs REAL: sulle prop firm il drawdown massimo è il tuo vero rischio",
+        ]
+    },
+    "backtesting": {
+        "description": "Il backtest è fondamentale per validare una strategia prima di tradare con soldi reali.",
+        "rules": [
+            "Backtest minimo: 200-300 trade su dati storici prima di considerare una strategia valida",
+            "Analizza win rate, expectancy, massimo drawdown, profit factor",
+            "Evita overfitting: non ottimizzare troppo su dati storici",
+            "Forward test: testa la strategia su dati non visti per almeno 1-3 mesi",
+            "Raccolta dati: annota ogni trade con entry, SL, TP, outcome e condizioni di mercato",
+            "Expectancy positiva: (Win rate × avg win) - (Loss rate × avg loss) > 0",
+            "Un buon trader sistematico sa esattamente le statistiche della sua strategia",
+        ]
+    },
+    "smart_delivery": {
+        "description": "SMART DELIVERY - Strategia H1-M5 per la gestione dell'entry su timeframe multipli.",
+        "rules": [
+            "H1: identifica il POI e la struttura di HTF",
+            "M5: attendi il ritracciamento al POI e la formazione di IPA",
+            "M1: entry preciso al completamento della struttura IPA su M1",
+            "SL: sotto il minimo/massimo dell'IPA su M1",
+            "TP: al prossimo livello di liquidità su H1",
+        ]
+    },
+    "msu": {
+        "description": "MSU (Market Structure Unwind) - Pattern di entry all'interno dei POI.",
+        "rules": [
+            "MSU = mini struttura di inversione che si forma all'interno di un POI",
+            "Cerca ChoCH su M1-M5 all'interno del POI per conferma entry",
+            "MSU bullish: price sweeps low, then creates HH → entry on HL formation",
+            "MSU bearish: price sweeps high, then creates LL → entry on LH formation",
+            "L'MSU è il segnale di entry più preciso - reduce il rischio massimizzando il R/R",
+        ]
+    },
+    "protocollo": {
+        "description": "IL PROTOCOLLO - Sistema a 5 step per il trading sistematico.",
+        "steps": {
+            "1": "Analisi HTF: determina trend, POI principali, bias della settimana/giorno",
+            "2": "Identifica zona di interesse: individua il POI dove vuoi tradare",
+            "3": "Piano di trading: definisci entry, SL, TP PRIMA che il prezzo arrivi",
+            "4": "Gestione della posizione: segui il piano, non modificare SL contro di te",
+            "5": "Review e miglioramento: analizza ogni trade, aggiorna le statistiche",
+        },
+        "systematic_approach": [
+            "Trading sistematico = stesse regole applicate sempre, senza eccezioni",
+            "Non tradare su impulsività - aspetta sempre la confluenza",
+            "Tieni un journal di trading con ogni trade e il reasoning",
+            "Rivedi i trade settimanalmente per identificare pattern di errori",
+            "La strategia deve avere un edge statisticamente provato su backtest",
+        ]
+    }
+}
+
+STRATEGIES = [
+    {
+        "name": "Session Strategy + HTR & IPA",
+        "description": "Strategia principale del corso - basata sui cicli delle sessioni e HTF reference",
+        "timeframes": ["D1", "H4", "H1", "M15", "M5", "M1"],
+        "setup": [
+            "Determina bias HTF (D1/H4): identifica trend e POI principali",
+            "Aspetta sessione London o NY",
+            "Attendi sweep della liquidità asiatica (SLQ/BSL/SSL)",
+            "Dopo il sweep, cerca BOS su H1 per confermare inversione",
+            "Entra al retest del POI su M5/M1 con IPA confermata",
+            "SL: sotto il minimo del sweep, TP: al prossimo livello di liquidità HTF",
+        ],
+        "entry_conditions": [
+            "sweep_asian_liquidity",
+            "bos_h1_confirmed",
+            "poi_htf_aligned",
+            "ipa_m5_confirmed",
+            "daily_bias_aligned",
+        ]
+    },
+    {
+        "name": "Strategia M1 Zone Protette (Scalping LTF)",
+        "description": "Scalping su M1 usando zone protette come POI",
+        "timeframes": ["M15", "M5", "M1"],
+        "setup": [
+            "Identifica zone protette su M15 (OB o FVG non mitigato)",
+            "Aspetta che il prezzo ritorni alla zona protetta su M5",
+            "Entra su M1 con conferma di MSU o LIT all'interno della zona",
+            "SL stretto: sotto/sopra la zona protetta",
+            "TP: al prossimo livello di liquidità su M15",
+        ],
+        "entry_conditions": [
+            "protected_zone_identified",
+            "msu_m1_confirmed",
+            "no_opposing_poi_nearby",
+        ]
+    },
+    {
+        "name": "Smart Delivery H1-M5",
+        "description": "Entry multi-timeframe allineato al bias HTF",
+        "timeframes": ["H4", "H1", "M15", "M5"],
+        "setup": [
+            "H4/H1: identifica POI e bias principale",
+            "M15: attendi struttura allineata e ritracciamento al POI",
+            "M5: entry al completamento dell'IPA nel POI",
+            "SL: sotto il POI M5, TP: al target H1",
+        ],
+        "entry_conditions": [
+            "h4_bias_bullish_or_bearish",
+            "h1_poi_reached",
+            "m5_ipa_confirmed",
+            "risk_reward_min_2",
+        ]
+    }
+]
+
+INDICATORS_IN_COURSE = [
+    "Nessun indicatore classico (MA, RSI, MACD) - il corso è basato su price action pura",
+    "Focus su: struttura di mercato, liquidità, orderflow",
+    "Si usa solo il grafico a candele (candlestick chart)",
+    "Eventualmente volume per conferma",
+    "Fibonacci: 0.382, 0.5, 0.618, 0.786 come livelli chiave",
+    "Daily Open Price come livello di riferimento giornaliero",
+]
+
+MENTAL_COACH_PRINCIPLES = [
+    "Il trading è probabilistico - non esiste certezza in ogni singolo trade",
+    "La disciplina è più importante della strategia - segui le regole sempre",
+    "Non inseguire i trade mancati - ci sono sempre altre opportunità",
+    "Gestisci le emozioni: non aumentare il rischio dopo una perdita",
+    "La dopamina del trading può portare a overtrading - sii consapevole",
+    "Un buon trader conosce le statistiche della sua strategia e si fida del sistema",
+    "Journal obbligatorio: ogni trade deve essere documentato e analizzato",
+    "Aspettative realistiche: il trading è un processo lento di miglioramento",
+]
+
+
+def build_knowledge():
+    knowledge = {
+        "source": "Space Traders Academy - spacetraders.it",
+        "methodology": "SMC/ICT - Smart Money Concepts / Inner Circle Trader",
+        "markets": ["Forex", "Futures"],
+        "lesson_catalog": LESSON_CATALOG,
+        "total_lessons": sum(len(c["lessons"]) for c in LESSON_CATALOG),
+        "concepts": CONCEPTS,
+        "strategies": STRATEGIES,
+        "indicators": INDICATORS_IN_COURSE,
+        "mental_coach": MENTAL_COACH_PRINCIPLES,
+        "key_terms": {
+            "BOS": "Break of Structure",
+            "ChoCH": "Change of Character",
+            "POI": "Point of Interest",
+            "FVG": "Fair Value Gap",
+            "OB": "Order Block",
+            "IPA": "Internal Price Action",
+            "EPA": "External Price Action",
+            "HTR": "High Time Frame Reference",
+            "LIT": "Liquidity Inducement Trap",
+            "SLQ": "Stop Loss Quake",
+            "ILQ": "Internal Liquidity",
+            "MSU": "Market Structure Unwind",
+            "SSL": "Sell Side Liquidity",
+            "BSL": "Buy Side Liquidity",
+            "HTF": "Higher Time Frame",
+            "LTF": "Lower Time Frame",
+            "MTF": "Middle Time Frame",
+        },
+        "entry_rules": [
+            "Segui sempre il bias di HTF (D1/H4) prima di qualsiasi entry",
+            "Entra solo in confluenza: bias HTF + POI + IPA confermata",
+            "Mai entrare contro il trend principale senza setup da manuale",
+            "Aspetta il retest del POI - non inseguire il prezzo",
+            "Conferma entry con MSU o LIT su LTF (M1-M5)",
+            "SL sempre oltre il POI, mai troppo stretto",
+            "RR minimo 1:2, preferibile 1:3",
+        ],
+        "exit_rules": [
+            "TP al prossimo livello di liquidità significativo su HTF",
+            "Chiudi parzialmente al 50% del movimento per proteggere il trade",
+            "Sposta SL a breakeven quando il prezzo ha percorso 1:1",
+            "Esci se la struttura di HTF cambia contro di te",
+            "Non tenere posizioni aperte overnight senza ragione tecnica valida",
+            "Chiudi prima di news ad alto impatto se non è parte del piano",
+        ],
+        "risk_management": [
+            "Rischio per trade: 1% del conto (max 2% in setup eccezionali)",
+            "Max drawdown giornaliero: 3-5% del conto",
+            "Max 3 trade aperti contemporaneamente",
+            "Dopo 2 loss consecutivi: stop trading per quella sessione",
+            "Position size calcolata sempre in base a SL in pips, non a sensazione",
+            "Prop firm: rispetta drawdown daily e totale come regola assoluta",
+        ],
+        "session_rules": {
+            "Asian": "Osserva - identifica il range e i livelli di liquidità",
+            "London": "Principale sessione - aspetta sweep asiatica, poi entry",
+            "NewYork": "Conferma o continuazione del movimento London - entry secondaria",
+            "Avoid": "Evita i primi 5-10 minuti di ogni sessione (spike di volatilità)",
+        }
+    }
+
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(knowledge, f, ensure_ascii=False, indent=2)
+
+    print(f"Knowledge base saved: {OUTPUT_PATH}")
+    print(f"Total lessons: {knowledge['total_lessons']}")
+    print(f"Concepts: {list(knowledge['concepts'].keys())}")
+    print(f"Strategies: {[s['name'] for s in knowledge['strategies']]}")
+    return knowledge
+
+
+if __name__ == "__main__":
+    build_knowledge()
