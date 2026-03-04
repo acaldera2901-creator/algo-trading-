@@ -102,7 +102,7 @@ void SendCandles()
       AccountInfoDouble(ACCOUNT_BALANCE),
       AccountInfoDouble(ACCOUNT_EQUITY),
       AccountInfoDouble(ACCOUNT_MARGIN),
-      AccountInfoDouble(ACCOUNT_FREEMARGIN)
+      AccountInfoDouble(ACCOUNT_MARGIN_FREE)
    );
    PostToServer("/account", accJson);
 
@@ -163,9 +163,10 @@ void SendPositions()
 //+------------------------------------------------------------------+
 void CheckCommands()
 {
+   char getData[];   // empty body for GET
    char result[];
    string headers;
-   int res = WebRequest("GET", BaseURL + "/commands", "", "", 5000, result, 0, headers);
+   int res = WebRequest("GET", BaseURL + "/commands", "", "", 5000, getData, 0, result, headers);
    if(res == -1 || ArraySize(result) == 0) return;
 
    string response = CharArrayToString(result);
