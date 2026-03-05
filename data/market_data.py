@@ -85,18 +85,55 @@ def _fetch_mt5(symbol, timeframe, count):
         return pd.DataFrame()
 
 
+# Mapping simboli MT5/OANDA → yfinance
+YFINANCE_SYMBOL_MAP = {
+    "XAUUSD": "GC=F",       # Gold futures
+    "XAU_USD": "GC=F",
+    "BTCUSD": "BTC-USD",    # Bitcoin / USD
+    "BTC_USD": "BTC-USD",
+    "ETHUSD": "ETH-USD",
+    "ETH_USD": "ETH-USD",
+    "EURUSD": "EURUSD=X",
+    "EUR_USD": "EURUSD=X",
+    "GBPUSD": "GBPUSD=X",
+    "GBP_USD": "GBPUSD=X",
+    "USDJPY": "JPY=X",
+    "USD_JPY": "JPY=X",
+    "USDCHF": "CHF=X",
+    "AUDUSD": "AUDUSD=X",
+    "USDCAD": "CAD=X",
+    "NZDUSD": "NZDUSD=X",
+}
+
+
 def _fetch_yfinance(symbol, timeframe, count):
     try:
         import yfinance as yf
         tf_map = {"M1": "1m", "M5": "5m", "M15": "15m", "H1": "1h", "H4": "4h", "D1": "1d"}
-        period_map = {"M1": "7d", "M5": "7d", "M15": "60d", "H1": "60d", "H4": "60d", "D1": "2y"}
-        yf_symbol = symbol.replace("_", "=X") if "_" in symbol else symbol + "=X"
-        df = yf.download(yf_symbol, period=period_map.get(timeframe, "60d"),
-                         interval=tf_map.get(timeframe, "1h"), progress=False)
-        df.columns = [c.lower() for c in df.columns]
-        return df[["open", "high", "low", "close", "volume"]].tail(count)
+        period_map = {
+            "M1": "7d", "M5": "7d", "M15": "60d",
+            "H1": "730d", "H4": "730d", "D1": "2y",
+        }
+
+        # Usa la mappa prima, altrimenti converti automaticamente
+        clean = symbol.replace("_", "").upper()
+        yf_symbol = YFINANCE_SYMBOL_MAP.get(clean) or YFINANCE_SYMBOL_MAP.get(symbol)
+        if not yf_symbol:
+            # fallback generico: EURUSD → EURUSD=X
+            yf_symbol = symbol.replace("_", "") + "=X"
+
+        # Usa il fetcher diretto Yahoo Finance v8 (no yfinance dependency)
+        from data.yahoo_fetcher import fetch_ohlcv
+        interval = tf_map.get(timeframe, "1h")
+        days_map = {"1m": 7, "5m": 60, "15m": 60, "1h": 730, "4h": 730, "1d": 730}
+        days = days_map.get(interval, 730)
+        df = fetch_ohlcv(yf_symbol, interval, days)
+        if df.empty:
+            return pd.DataFrame()
+        logger.info(f"Yahoo: {len(df)} candles for {symbol} ({yf_symbol}) {timeframe}")
+        return df.tail(count)
     except Exception as e:
-        logger.error(f"yfinance fetch error: {e}")
+        logger.error(f"Yahoo fetch error ({symbol}): {e}")
         return pd.DataFrame()
 
 
@@ -388,8 +425,9 @@ def compute_smc_indicators(df: pd.DataFrame, df_d1: pd.DataFrame = None) -> dict
     fvgs = detect_fair_value_gaps(df)
     ind["fvg_bullish"] = [f for f in fvgs if f["type"] == "bullish"]
     ind["fvg_bearish"] = [f for f in fvgs if f["type"] == "bearish"]
-    ind["nearest_bullish_fvg"] = fvgs[-1] if fvgs and fvgs[-1]["type"] == "bullish" else None
-    ind["nearest_bearish_fvg"] = fvgs[-1] if fvgs and fvgs[-1]["type"] == "bearish" else None
+    # Bug fix: cerca il più recente FVG per tipo, non semplicemente l'ultimo
+    ind["nearest_bullish_fvg"] = next((f for f in reversed(fvgs) if f["type"] == "bullish"), None)
+    ind["nearest_bearish_fvg"] = next((f for f in reversed(fvgs) if f["type"] == "bearish"), None)
 
     # Order blocks
     obs = detect_order_blocks(df)
@@ -457,7 +495,10 @@ def get_market_snapshot(
     elif broker == "ea_bridge" and mt5_executor is not None:
         # Use EA HTTP bridge (Mac MT5 via MQL5 EA) — EA sends H1 candles
         df = mt5_executor.get_candles_df(symbol, count)
-        # D1 falls through to frankfurter fallback below
+        # D1: prendi da yfinance (EA non invia D1 separatamente)
+        if not df.empty:
+            clean = symbol.replace("_", "").upper()
+            df_d1 = _fetch_yfinance(clean, "D1", 30)
     elif broker == "oanda":
         kw = {"api_key": broker_kwargs.get("api_key", ""),
               "account_id": broker_kwargs.get("account_id", ""),
@@ -468,9 +509,10 @@ def get_market_snapshot(
     if df.empty:
         # Fallback chain: yfinance → frankfurter (daily, dev only)
         logger.warning(f"Primary fetch failed, trying yfinance for {symbol}")
-        yf_symbol = symbol.replace("_", "")
-        df = _fetch_yfinance(yf_symbol, timeframe, count)
-        df_d1 = _fetch_yfinance(yf_symbol, "D1", 30) if not df.empty else pd.DataFrame()
+        clean_sym = symbol.replace("_", "").upper()
+        df = _fetch_yfinance(clean_sym, timeframe, count)
+        if not df.empty and df_d1.empty:
+            df_d1 = _fetch_yfinance(clean_sym, "D1", 30)
 
     if df.empty:
         logger.warning(f"yfinance failed, using frankfurter.app daily fallback for {symbol}")

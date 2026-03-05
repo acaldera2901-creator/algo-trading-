@@ -55,7 +55,33 @@ LOOP_INTERVAL_SECONDS = int(os.getenv("LOOP_INTERVAL_SECONDS", "3600"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # ─── Self-improvement ─────────────────────────────────────────────────────────
-MIN_TRADES_FOR_TUNING = int(os.getenv("MIN_TRADES_FOR_TUNING", "20"))
+MIN_TRADES_FOR_TUNING = int(os.getenv("MIN_TRADES_FOR_TUNING", "15"))
 RULE_SUCCESS_THRESHOLD = int(os.getenv("RULE_SUCCESS_THRESHOLD", "3"))
 RULE_FAILURE_THRESHOLD = int(os.getenv("RULE_FAILURE_THRESHOLD", "3"))
-CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.6"))
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.55"))
+
+# ─── Strumenti CFD — dimensioni contratto ─────────────────────────────────────
+# Usato dal RiskManager per calcolare il position sizing corretto per lotti MT5.
+# 1 lotto XAUUSD = 100 oz → value = prezzo × 100 per pip monetario
+# 1 lotto BTCUSD = 1 BTC  → valore alto, sizing conservativo necessario
+SYMBOL_CONTRACT_SIZES: dict = {
+    "XAUUSD":  100,
+    "XAU_USD": 100,
+    "BTCUSD":  1,
+    "BTC_USD": 1,
+    "ETHUSD":  1,
+    "ETH_USD": 1,
+    "EURUSD":  100_000,
+    "EUR_USD": 100_000,
+    "GBPUSD":  100_000,
+    "GBP_USD": 100_000,
+    "USDJPY":  100_000,
+    "USD_JPY": 100_000,
+    "USDCHF":  100_000,
+    "AUDUSD":  100_000,
+    "USDCAD":  100_000,
+    "NZDUSD":  100_000,
+}
+DEFAULT_CONTRACT_SIZE = int(os.getenv("DEFAULT_CONTRACT_SIZE", "100000"))
+MIN_LOT_SIZE = float(os.getenv("MIN_LOT_SIZE", "0.01"))
+MAX_LOT_SIZE = float(os.getenv("MAX_LOT_SIZE", "5.0"))

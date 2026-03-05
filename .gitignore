@@ -12,4 +12,6 @@ venv/
 *.db
 # knowledge/course_knowledge.json  # tracked — built from scraper
 *.log
+training.pid
+tunnel_url.txt
 .playwright/

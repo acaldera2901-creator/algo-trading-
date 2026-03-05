@@ -1,19 +1,118 @@
 {
   "version": 1,
-  "last_updated": null,
-  "rules": [],
+  "last_updated": "2026-03-05T02:41:09.556138+00:00",
+  "rules": [
+    {
+      "pattern": "trend_up",
+      "weight": 0.11499999999999999,
+      "successes": 48,
+      "failures": 63,
+      "total": 111,
+      "win_rate": 0.43243243243243246,
+      "suspended": false
+    },
+    {
+      "pattern": "ssl_sweep_bullish_signal",
+      "weight": 0.14205084426894524,
+      "successes": 76,
+      "failures": 110,
+      "total": 186,
+      "win_rate": 0.40860215053763443,
+      "suspended": false
+    },
+    {
+      "pattern": "bsl_sweep_bearish_signal",
+      "weight": 0.14914500872949663,
+      "successes": 92,
+      "failures": 130,
+      "total": 222,
+      "win_rate": 0.4144144144144144,
+      "suspended": false
+    },
+    {
+      "pattern": "session_new_york",
+      "weight": 0.10988321874999997,
+      "successes": 121,
+      "failures": 163,
+      "total": 284,
+      "win_rate": 0.426056338028169,
+      "suspended": false
+    },
+    {
+      "pattern": "bos_bullish",
+      "weight": 0.12074321762860346,
+      "successes": 38,
+      "failures": 52,
+      "total": 90,
+      "win_rate": 0.4222222222222222,
+      "suspended": false
+    },
+    {
+      "pattern": "price_at_bullish_fvg",
+      "weight": 0.11499999999999999,
+      "successes": 44,
+      "failures": 55,
+      "total": 99,
+      "win_rate": 0.4444444444444444,
+      "suspended": true
+    },
+    {
+      "pattern": "trend_down",
+      "weight": 0.17096536093749992,
+      "successes": 16,
+      "failures": 31,
+      "total": 47,
+      "win_rate": 0.3404255319148936,
+      "suspended": true
+    },
+    {
+      "pattern": "bos_bearish",
+      "weight": 0.17096536093749992,
+      "successes": 16,
+      "failures": 26,
+      "total": 42,
+      "win_rate": 0.38095238095238093,
+      "suspended": true
+    },
+    {
+      "pattern": "price_at_bearish_fvg",
+      "weight": 0.13573046951675383,
+      "successes": 18,
+      "failures": 32,
+      "total": 50,
+      "win_rate": 0.36,
+      "suspended": true
+    },
+    {
+      "pattern": "session_london",
+      "weight": 0.2268309151514731,
+      "successes": 47,
+      "failures": 87,
+      "total": 134,
+      "win_rate": 0.35074626865671643,
+      "suspended": true
+    }
+  ],
   "risk_adjustments": {
-    "risk_per_trade_pct": null,
+    "risk_per_trade_pct": 0.5,
     "sl_multiplier": null,
-    "tp_multiplier": null
+    "tp_multiplier": 1.2
   },
   "performance_stats": {
-    "total_trades": 0,
-    "winning_trades": 0,
-    "losing_trades": 0,
-    "win_rate": 0.0,
-    "avg_pnl": 0.0,
-    "best_patterns": [],
-    "worst_patterns": []
+    "total_trades": 100,
+    "winning_trades": 42,
+    "losing_trades": 58,
+    "win_rate": 0.42,
+    "avg_pnl": 12.354022999999994,
+    "best_patterns": [
+      "price_at_bullish_fvg",
+      "trend_up",
+      "session_new_york"
+    ],
+    "worst_patterns": [
+      "price_at_bearish_fvg",
+      "session_london",
+      "trend_down"
+    ]
   }
 }

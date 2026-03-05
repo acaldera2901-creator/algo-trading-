@@ -217,12 +217,21 @@ def suggest_risk_adjustments(current_params: RiskParams) -> dict:
         if new_risk != current_params.risk_per_trade_pct:
             suggestions["risk_per_trade_pct"] = round(new_risk, 2)
 
-    # Adjust TP multiplier: if most exits at SL, maybe TP is too far
-    sl_hits = len([t for t in losses if t.get("exit_price") and t.get("stop_loss") and
-                   abs(t["exit_price"] - t["stop_loss"]) < 0.0001])
-    if sl_hits > len(losses) * 0.8 and len(losses) > 5:
-        new_tp = max(current_params.tp_multiplier * 0.9, 1.2)
-        suggestions["tp_multiplier"] = round(new_tp, 2)
+    # Adjust TP multiplier basato su RR realizzato
+    # Non ridurre TP solo perché si finisce sempre in SL — è normale in un sistema trend-following
+    # Riduci TP solo se il avg_win è molto inferiore all'avg_loss (RR inverso)
+    if len(wins) >= 5 and len(losses) >= 5:
+        avg_win_pnl  = sum(abs(t["pnl"]) for t in wins)   / len(wins)
+        avg_loss_pnl = sum(abs(t["pnl"]) for t in losses) / len(losses)
+        realized_rr  = avg_win_pnl / avg_loss_pnl if avg_loss_pnl > 0 else 1.0
+        # Se RR realizzato è ok (>= 1.0) non toccare TP
+        if realized_rr < 0.8:
+            new_tp = max(current_params.tp_multiplier * 0.95, 1.8)  # floor a 1.8×ATR
+            suggestions["tp_multiplier"] = round(new_tp, 2)
+        elif realized_rr > 1.5 and win_rate >= 0.5:
+            # Possiamo alzare TP se RR è alto e WR è buona
+            new_tp = min(current_params.tp_multiplier * 1.05, 4.0)
+            suggestions["tp_multiplier"] = round(new_tp, 2)
 
     if suggestions:
         logger.info(f"[Improver] Suggested risk adjustments: {suggestions}")

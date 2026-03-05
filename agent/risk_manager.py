@@ -58,18 +58,34 @@ class RiskManager:
         account_balance: float,
         entry_price: float,
         stop_loss: float,
+        symbol: str = "EURUSD",
         pip_value: float = 1.0,
     ) -> float:
         """
-        Calculate units to trade so that the loss at SL == risk_per_trade_pct of balance.
-        pip_value: value of 1 pip in account currency per unit (default 1.0 for OANDA)
+        Calcola i lotti (MT5 standard lots) in base al rischio per trade.
+
+        Formula: lots = risk_amount / (sl_distance_in_price × contract_size)
+
+        Esempi:
+          EURUSD contract_size=100,000: sl=30 pips (0.0030) → lots = 100/(0.003×100000) = 0.33
+          XAUUSD contract_size=100 oz:  sl=$30 → lots = 100/(30×100) = 0.033
+          BTCUSD contract_size=1 BTC:   sl=$5000 → lots = 100/(5000×1) = 0.02
         """
         risk_amount = account_balance * (self.params.risk_per_trade_pct / 100.0)
         sl_distance = abs(entry_price - stop_loss)
-        if sl_distance == 0 or pip_value == 0:
-            return 0.0
-        units = risk_amount / (sl_distance * pip_value)
-        return round(units, 0)
+        if sl_distance <= 0:
+            return config.MIN_LOT_SIZE
+
+        contract_size = config.SYMBOL_CONTRACT_SIZES.get(
+            symbol.upper().replace("_", ""),
+            config.DEFAULT_CONTRACT_SIZE,
+        )
+
+        lots = risk_amount / (sl_distance * contract_size)
+        lots = round(lots, 2)
+        lots = max(lots, config.MIN_LOT_SIZE)
+        lots = min(lots, config.MAX_LOT_SIZE)
+        return lots
 
     def compute_sl_tp(
         self,
@@ -111,7 +127,9 @@ class RiskManager:
 
         stop_loss, take_profit = self.compute_sl_tp(direction, entry_price, atr)
         risk_amount = account_balance * (self.params.risk_per_trade_pct / 100.0)
-        position_size = self.calculate_position_size(account_balance, entry_price, stop_loss)
+        position_size = self.calculate_position_size(
+            account_balance, entry_price, stop_loss, symbol=symbol
+        )
         sl_dist = abs(entry_price - stop_loss)
         tp_dist = abs(entry_price - take_profit)
         rr = tp_dist / sl_dist if sl_dist > 0 else 0.0
