@@ -249,8 +249,8 @@ class EABridgeExecutor:
         from agent.executor import OrderResult
         import config
 
-        # Convert units to lots (1 lot = 100,000 units)
-        volume = max(round(setup.position_size / 100000, 2), 0.01)
+        # position_size è già in lotti (calcolato da risk_manager.py)
+        volume = max(round(setup.position_size, 2), 0.01)
 
         cmd = {
             "action": setup.direction,

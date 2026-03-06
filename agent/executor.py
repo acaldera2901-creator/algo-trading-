@@ -140,8 +140,8 @@ class MT5Executor:
             tick = mt5.symbol_info_tick(setup.symbol)
             price = tick.ask if setup.direction == "buy" else tick.bid
 
-            # Convert units to lots (1 standard lot = 100,000 units)
-            volume = max(round(setup.position_size / 100000, 2), 0.01)
+            # position_size è già in lotti (calcolato da risk_manager.py)
+            volume = max(round(setup.position_size, 2), 0.01)
 
             request = {
                 "action": TRADE_ACTION_DEAL,
